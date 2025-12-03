@@ -16,35 +16,66 @@ export interface DevBrowserClient {
 export async function connect(serverUrl: string): Promise<DevBrowserClient> {
   let browser: Browser | null = null;
   let wsEndpoint: string | null = null;
+  let connectingPromise: Promise<Browser> | null = null;
 
   async function ensureConnected(): Promise<Browser> {
+    // Return existing connection if still active
     if (browser && browser.isConnected()) {
       return browser;
     }
 
-    // Fetch wsEndpoint from server
-    const res = await fetch(serverUrl);
-    const info = (await res.json()) as ServerInfoResponse;
-    wsEndpoint = info.wsEndpoint;
+    // If already connecting, wait for that connection (prevents race condition)
+    if (connectingPromise) {
+      return connectingPromise;
+    }
 
-    // Connect to the browser via CDP
-    browser = await chromium.connectOverCDP(wsEndpoint);
-    return browser;
+    // Start new connection with mutex
+    connectingPromise = (async () => {
+      try {
+        // Fetch wsEndpoint from server
+        const res = await fetch(serverUrl);
+        if (!res.ok) {
+          throw new Error(`Server returned ${res.status}: ${await res.text()}`);
+        }
+        const info = (await res.json()) as ServerInfoResponse;
+        wsEndpoint = info.wsEndpoint;
+
+        // Connect to the browser via CDP
+        browser = await chromium.connectOverCDP(wsEndpoint);
+        return browser;
+      } finally {
+        connectingPromise = null;
+      }
+    })();
+
+    return connectingPromise;
   }
 
   // Find page by CDP targetId - more reliable than JS globals
   async function findPageByTargetId(b: Browser, targetId: string): Promise<Page | null> {
     for (const context of b.contexts()) {
       for (const page of context.pages()) {
+        let cdpSession;
         try {
-          const cdpSession = await context.newCDPSession(page);
+          cdpSession = await context.newCDPSession(page);
           const { targetInfo } = await cdpSession.send("Target.getTargetInfo");
-          await cdpSession.detach();
           if (targetInfo.targetId === targetId) {
             return page;
           }
-        } catch {
-          // Page might be closed
+        } catch (err) {
+          // Only ignore "target closed" errors, log unexpected ones
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes("Target closed") && !msg.includes("Session closed")) {
+            console.warn(`Unexpected error checking page target: ${msg}`);
+          }
+        } finally {
+          if (cdpSession) {
+            try {
+              await cdpSession.detach();
+            } catch {
+              // Ignore detach errors - session may already be closed
+            }
+          }
         }
       }
     }
