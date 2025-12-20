@@ -330,12 +330,46 @@ export async function connect(serverUrl = "http://localhost:9222"): Promise<DevB
       throw new Error(`Failed to get page: ${await res.text()}`);
     }
 
-    const { targetId } = (await res.json()) as GetPageResponse;
+    const pageInfo = (await res.json()) as GetPageResponse & { url?: string };
+    const { targetId } = pageInfo;
 
     // Connect to browser
     const b = await ensureConnected();
 
-    // Find the page by targetId
+    // Check if we're in extension mode
+    const infoRes = await fetch(serverUrl);
+    const info = (await infoRes.json()) as { mode?: string };
+    const isExtensionMode = info.mode === "extension";
+
+    if (isExtensionMode) {
+      // In extension mode, DON'T use findPageByTargetId as it corrupts page state
+      // Instead, find page by URL or use the only available page
+      const allPages = b.contexts().flatMap((ctx) => ctx.pages());
+
+      if (allPages.length === 0) {
+        throw new Error(`No pages available in browser`);
+      }
+
+      if (allPages.length === 1) {
+        return allPages[0]!;
+      }
+
+      // Multiple pages - try to match by URL if available
+      if (pageInfo.url) {
+        const matchingPage = allPages.find((p) => p.url() === pageInfo.url);
+        if (matchingPage) {
+          return matchingPage;
+        }
+      }
+
+      // Fall back to first page
+      if (!allPages[0]) {
+        throw new Error(`No pages available in browser`);
+      }
+      return allPages[0];
+    }
+
+    // In launch mode, use the original targetId-based lookup
     const page = await findPageByTargetId(b, targetId);
     if (!page) {
       throw new Error(`Page "${name}" not found in browser contexts`);

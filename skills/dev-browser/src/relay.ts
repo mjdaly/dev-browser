@@ -43,6 +43,7 @@ interface ConnectedTarget {
 interface PlaywrightClient {
   id: string;
   ws: WSContext;
+  knownTargets: Set<string>; // targetIds this client has received attachedToTarget for
 }
 
 // Message types for extension communication
@@ -145,6 +146,41 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
     }
   }
 
+  /**
+   * Send Target.attachedToTarget event with deduplication.
+   * Tracks which targets each client has seen to prevent "Duplicate target" errors.
+   */
+  function sendAttachedToTarget(
+    target: ConnectedTarget,
+    clientId?: string,
+    waitingForDebugger = false
+  ) {
+    const event: CDPEvent = {
+      method: "Target.attachedToTarget",
+      params: {
+        sessionId: target.sessionId,
+        targetInfo: { ...target.targetInfo, attached: true },
+        waitingForDebugger,
+      },
+    };
+
+    if (clientId) {
+      const client = playwrightClients.get(clientId);
+      if (client && !client.knownTargets.has(target.targetId)) {
+        client.knownTargets.add(target.targetId);
+        client.ws.send(JSON.stringify(event));
+      }
+    } else {
+      // Broadcast to all clients that don't know about this target yet
+      for (const client of playwrightClients.values()) {
+        if (!client.knownTargets.has(target.targetId)) {
+          client.knownTargets.add(target.targetId);
+          client.ws.send(JSON.stringify(event));
+        }
+      }
+    }
+  }
+
   async function sendToExtension({
     method,
     params,
@@ -213,6 +249,18 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
 
       case "Target.setDiscoverTargets":
         return {};
+
+      case "Target.attachToBrowserTarget":
+        // Browser-level session - return a fake session since we only proxy tabs
+        return { sessionId: "browser" };
+
+      case "Target.detachFromTarget":
+        // If detaching from our fake "browser" session, just return success
+        if (sessionId === "browser" || params?.sessionId === "browser") {
+          return {};
+        }
+        // Otherwise forward to extension
+        break;
 
       case "Target.attachToTarget": {
         const targetId = params?.targetId as string;
@@ -381,7 +429,7 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
             return;
           }
 
-          playwrightClients.set(clientId, { id: clientId, ws });
+          playwrightClients.set(clientId, { id: clientId, ws, knownTargets: new Set() });
           log(`Playwright client connected: ${clientId}`);
         },
 
@@ -411,20 +459,11 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
           try {
             const result = await routeCdpCommand({ method, params, sessionId });
 
-            // After Target.setAutoAttach, send attachedToTarget events for existing targets
+            // After Target.setAutoAttach, send attachedToTarget for existing targets
+            // Uses deduplication to prevent "Duplicate target" errors
             if (method === "Target.setAutoAttach" && !sessionId) {
               for (const target of connectedTargets.values()) {
-                sendToPlaywright(
-                  {
-                    method: "Target.attachedToTarget",
-                    params: {
-                      sessionId: target.sessionId,
-                      targetInfo: { ...target.targetInfo, attached: true },
-                      waitingForDebugger: false,
-                    },
-                  },
-                  clientId
-                );
+                sendAttachedToTarget(target, clientId);
               }
             }
 
@@ -446,7 +485,7 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
               }
             }
 
-            // After Target.attachToTarget, send attachedToTarget event
+            // After Target.attachToTarget, send attachedToTarget event (with deduplication)
             if (
               method === "Target.attachToTarget" &&
               (result as { sessionId?: string })?.sessionId
@@ -456,17 +495,7 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
                 (t) => t.targetId === targetId
               );
               if (target) {
-                sendToPlaywright(
-                  {
-                    method: "Target.attachedToTarget",
-                    params: {
-                      sessionId: (result as { sessionId: string }).sessionId,
-                      targetInfo: { ...target.targetInfo, attached: true },
-                      waitingForDebugger: false,
-                    },
-                  },
-                  clientId
-                );
+                sendAttachedToTarget(target, clientId);
               }
             }
 
@@ -569,22 +598,17 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
                 targetInfo: TargetInfo;
               };
 
-              const alreadyConnected = connectedTargets.has(targetParams.sessionId);
-
-              connectedTargets.set(targetParams.sessionId, {
+              const target: ConnectedTarget = {
                 sessionId: targetParams.sessionId,
                 targetId: targetParams.targetInfo.targetId,
                 targetInfo: targetParams.targetInfo,
-              });
+              };
+              connectedTargets.set(targetParams.sessionId, target);
 
               log(`Target attached: ${targetParams.targetInfo.url} (${targetParams.sessionId})`);
 
-              if (!alreadyConnected) {
-                sendToPlaywright({
-                  method: "Target.attachedToTarget",
-                  params: targetParams,
-                });
-              }
+              // Use deduplication helper - only sends to clients that don't know about this target
+              sendAttachedToTarget(target);
             } else if (method === "Target.detachedFromTarget") {
               const detachParams = params as { sessionId: string };
               connectedTargets.delete(detachParams.sessionId);
