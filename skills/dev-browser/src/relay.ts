@@ -356,7 +356,7 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
       return c.json({ error: "name is required" }, 400);
     }
 
-    // Check if page already exists
+    // Check if page already exists by name
     const existingSessionId = namedPages.get(name);
     if (existingSessionId) {
       const target = connectedTargets.get(existingSessionId);
@@ -365,29 +365,45 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
           wsEndpoint: `ws://${host}:${port}/cdp`,
           name,
           targetId: target.targetId,
+          url: target.targetInfo.url,
         });
       }
       // Session no longer valid, remove it
       namedPages.delete(name);
     }
 
-    // Find first unnamed target to assign this name to
-    const usedSessionIds = new Set(namedPages.values());
-    for (const [sessionId, target] of connectedTargets) {
-      if (!usedSessionIds.has(sessionId)) {
-        namedPages.set(name, sessionId);
-        return c.json({
-          wsEndpoint: `ws://${host}:${port}/cdp`,
-          name,
-          targetId: target.targetId,
-        });
-      }
+    // Create a new tab
+    if (!extensionWs) {
+      return c.json({ error: "Extension not connected" }, 503);
     }
 
-    return c.json(
-      { error: "No unnamed tabs available. Click extension icon on a tab first." },
-      404
-    );
+    try {
+      const result = (await sendToExtension({
+        method: "forwardCDPCommand",
+        params: { method: "Target.createTarget", params: { url: "about:blank" } },
+      })) as { targetId: string };
+
+      // Wait for Target.attachedToTarget event to register the new target
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Find and name the new target
+      for (const [sessionId, target] of connectedTargets) {
+        if (target.targetId === result.targetId) {
+          namedPages.set(name, sessionId);
+          return c.json({
+            wsEndpoint: `ws://${host}:${port}/cdp`,
+            name,
+            targetId: target.targetId,
+            url: target.targetInfo.url,
+          });
+        }
+      }
+
+      throw new Error("Target created but not found in registry");
+    } catch (err) {
+      log("Error creating tab:", err);
+      return c.json({ error: (err as Error).message }, 500);
+    }
   });
 
   // Delete a named page (removes the name, doesn't close the tab)
@@ -395,20 +411,6 @@ export async function serveRelay(options: RelayOptions = {}): Promise<RelayServe
     const name = c.req.param("name");
     const deleted = namedPages.delete(name);
     return c.json({ success: deleted });
-  });
-
-  // List unnamed (attached but not named) tabs
-  app.get("/tabs/unnamed", (c) => {
-    const usedSessionIds = new Set(namedPages.values());
-    const unnamedTabs = Array.from(connectedTargets.values())
-      .filter((t) => !usedSessionIds.has(t.sessionId))
-      .map((t) => ({
-        sessionId: t.sessionId,
-        targetId: t.targetId,
-        title: t.targetInfo.title,
-        url: t.targetInfo.url,
-      }));
-    return c.json({ tabs: unnamedTabs });
   });
 
   // ============================================================================

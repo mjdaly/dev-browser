@@ -206,14 +206,6 @@ async function getPageLoadState(page: Page): Promise<PageLoadState> {
   return result;
 }
 
-/** Information about an unnamed tab (extension mode only) */
-export interface UnnamedTab {
-  sessionId: string;
-  targetId: string;
-  title: string;
-  url: string;
-}
-
 /** Server mode information */
 export interface ServerInfo {
   wsEndpoint: string;
@@ -241,11 +233,6 @@ export interface DevBrowserClient {
    * Get server information including mode and extension connection status.
    */
   getServerInfo: () => Promise<ServerInfo>;
-  /**
-   * List unnamed tabs (extension mode only).
-   * These are tabs where the user clicked the extension icon but haven't been assigned names yet.
-   */
-  listUnnamed: () => Promise<UnnamedTab[]>;
 }
 
 export async function connect(serverUrl = "http://localhost:9222"): Promise<DevBrowserClient> {
@@ -473,16 +460,6 @@ export async function connect(serverUrl = "http://localhost:9222"): Promise<DevB
         mode: (info.mode as "launch" | "extension") ?? "launch",
         extensionConnected: info.extensionConnected,
       };
-    },
-
-    async listUnnamed(): Promise<UnnamedTab[]> {
-      const res = await fetch(`${serverUrl}/tabs/unnamed`);
-      if (!res.ok) {
-        // Not in extension mode or endpoint not available
-        return [];
-      }
-      const data = (await res.json()) as { tabs?: UnnamedTab[] };
-      return data.tabs ?? [];
     },
   };
 }

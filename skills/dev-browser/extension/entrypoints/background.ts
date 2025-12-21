@@ -358,25 +358,48 @@ export default defineBackground(() => {
   // WebSocket Connection
   // ============================================================================
 
-  async function ensureConnection(): Promise<void> {
+  // Connection manager state
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const RECONNECT_INTERVAL = 3000; // 3 seconds
+
+  /**
+   * Maintains connection to relay server with periodic reconnection.
+   * Called on startup and after disconnects.
+   */
+  function maintainConnection(): void {
+    // Clear any existing timer
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    // Try to connect (async, don't await)
+    tryConnect().catch(() => {
+      // Errors handled inside tryConnect
+    });
+
+    // Schedule next check
+    reconnectTimer = setTimeout(maintainConnection, RECONNECT_INTERVAL);
+  }
+
+  /**
+   * Attempts to connect to the relay server once.
+   * Does not retry - maintainConnection handles retries.
+   */
+  async function tryConnect(): Promise<void> {
     if (ws?.readyState === WebSocket.OPEN) {
       return;
     }
 
-    logger.debug("Connecting to relay server...");
-
-    // Wait for server to be available
-    while (true) {
-      try {
-        await fetch("http://localhost:9222", { method: "HEAD" });
-        break;
-      } catch {
-        logger.debug("Server not available, retrying...");
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+    // Check if server is available
+    try {
+      await fetch("http://localhost:9222", { method: "HEAD" });
+    } catch {
+      // Server not available, will retry on next maintainConnection cycle
+      return;
     }
 
-    logger.debug("Creating WebSocket connection");
+    logger.debug("Connecting to relay server...");
     const socket = new WebSocket(RELAY_URL);
 
     await new Promise<void>((resolve, reject) => {
@@ -436,18 +459,48 @@ export default defineBackground(() => {
       ws = null;
 
       void updateIcons();
+
+      // Trigger reconnection attempt
+      maintainConnection();
     };
 
     ws.onerror = (event: Event) => {
       logger.debug("WebSocket error:", event);
     };
 
-    // Set up debugger event listeners
-    chrome.debugger.onEvent.addListener(onDebuggerEvent);
-    chrome.debugger.onDetach.addListener(onDebuggerDetach);
+    // Set up debugger event listeners (only add once)
+    if (!chrome.debugger.onEvent.hasListener(onDebuggerEvent)) {
+      chrome.debugger.onEvent.addListener(onDebuggerEvent);
+    }
+    if (!chrome.debugger.onDetach.hasListener(onDebuggerDetach)) {
+      chrome.debugger.onDetach.addListener(onDebuggerDetach);
+    }
 
     logger.log("Connected to relay server");
     void updateIcons();
+  }
+
+  /**
+   * Ensures connection is established, used when user clicks to attach a tab.
+   * Will wait for connection if relay is starting up.
+   */
+  async function ensureConnection(): Promise<void> {
+    if (ws?.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    // Try immediately
+    await tryConnect();
+
+    // If still not connected, wait a bit and try again
+    if (ws?.readyState !== WebSocket.OPEN) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await tryConnect();
+    }
+
+    if (ws?.readyState !== WebSocket.OPEN) {
+      throw new Error("Could not connect to relay server");
+    }
   }
 
   // ============================================================================
@@ -603,4 +656,7 @@ export default defineBackground(() => {
 
   logger.log("Extension initialized");
   void updateIcons();
+
+  // Start connection manager - will auto-connect to relay and reconnect if disconnected
+  maintainConnection();
 });
