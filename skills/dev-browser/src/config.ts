@@ -124,7 +124,6 @@ export function getXdgStateHome(): string {
  */
 export function findProjectConfig(startDir?: string): string | undefined {
   let dir = startDir || process.cwd();
-  const root = dirname(dir) === dir ? dir : "/"; // Handle root directory
 
   while (true) {
     const configPath = join(dir, ".dev-browser", "config.json");
@@ -133,8 +132,8 @@ export function findProjectConfig(startDir?: string): string | undefined {
     }
 
     const parent = dirname(dir);
-    if (parent === dir || dir === root) {
-      // Reached filesystem root
+    if (parent === dir) {
+      // Reached filesystem root (works on both Unix "/" and Windows "C:\")
       break;
     }
     dir = parent;

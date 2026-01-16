@@ -286,4 +286,118 @@ describe("getStateDir", () => {
 
     expect(result).toBe("/home/user/.local/state/dev-browser");
   });
+
+  it("should prefer XDG over legacy when both directories exist", () => {
+    delete process.env.XDG_STATE_HOME;
+    process.env.HOME = "/home/user";
+    // Both directories exist
+    mockExistsSync.mockImplementation((path) => {
+      return (
+        path === "/home/user/.local/state/dev-browser" ||
+        path === "/home/user/.dev-browser"
+      );
+    });
+
+    const result = getStateDir();
+
+    // Should prefer XDG location
+    expect(result).toBe("/home/user/.local/state/dev-browser");
+  });
+});
+
+describe("loadConfig integration", () => {
+  const originalEnv = process.env;
+  const originalCwd = process.cwd;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.cwd = () => "/projects/myapp";
+    mockExistsSync.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    process.cwd = originalCwd;
+  });
+
+  it("should load config from project directory when present", async () => {
+    // This is an integration test - we need to reimport to get fresh module state
+    vi.resetModules();
+
+    // Set up mocks before importing
+    vi.doMock("fs", () => ({
+      existsSync: (path: string) => {
+        // Config file exists
+        if (path === "/projects/myapp/.dev-browser/config.json") return true;
+        // Browser path must also exist (loadConfig validates it)
+        if (path === "/usr/bin/my-chrome") return true;
+        return false;
+      },
+      readFileSync: (path: string) => {
+        if (path === "/projects/myapp/.dev-browser/config.json") {
+          return JSON.stringify({
+            browser: {
+              mode: "external",
+              path: "/usr/bin/my-chrome"
+            }
+          });
+        }
+        throw new Error(`File not found: ${path}`);
+      },
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+    }));
+
+    delete process.env.DEV_BROWSER_CONFIG;
+    process.env.HOME = "/home/user";
+
+    const { loadConfig } = await import("../config");
+    const config = loadConfig();
+
+    expect(config.browser.path).toBe("/usr/bin/my-chrome");
+    expect(config.browser.mode).toBe("external");
+  });
+
+  it("should warn and fallback when configured browser path does not exist", async () => {
+    vi.resetModules();
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.doMock("fs", () => ({
+      existsSync: (path: string) => {
+        // Config file exists, but browser path does NOT
+        if (path === "/projects/myapp/.dev-browser/config.json") return true;
+        return false;
+      },
+      readFileSync: (path: string) => {
+        if (path === "/projects/myapp/.dev-browser/config.json") {
+          return JSON.stringify({
+            browser: {
+              mode: "external",
+              path: "/nonexistent/chrome"
+            }
+          });
+        }
+        throw new Error(`File not found: ${path}`);
+      },
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+    }));
+
+    delete process.env.DEV_BROWSER_CONFIG;
+    process.env.HOME = "/home/user";
+
+    const { loadConfig } = await import("../config");
+    const config = loadConfig();
+
+    // Should have warned about missing browser
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Configured browser path does not exist")
+    );
+
+    // Browser path should be undefined (fallback to auto-detection returns undefined when nothing found)
+    expect(config.browser.path).toBeUndefined();
+
+    warnSpy.mockRestore();
+  });
 });
