@@ -22,6 +22,7 @@ import {
   outputPortForDiscovery,
   writePortFile,
   killStaleServers,
+  getStateDir,
 } from "./config.js";
 
 /** Idle timeout in milliseconds (30 minutes) */
@@ -112,22 +113,21 @@ function launchBrowserDetached(
     return;
   }
 
+  // Chrome requires a non-default user-data-dir for CDP debugging.
+  // If not explicitly configured, use a default profile in the state directory.
+  const effectiveUserDataDir = userDataDir || join(getStateDir(), "chrome-profile");
+
   // Standard launch: spawn binary directly with CDP flags
   const args = [
     `--remote-debugging-port=${cdpPort}`,
     "--no-first-run",
     "--no-default-browser-check",
+    `--user-data-dir=${effectiveUserDataDir}`,
   ];
-
-  // Only add user-data-dir if explicitly configured
-  // This lets the browser use its default profile when not specified
-  if (userDataDir) {
-    args.push(`--user-data-dir=${userDataDir}`);
-  }
 
   console.log(`Launching browser: ${browserPath}`);
   console.log(`  CDP port: ${cdpPort}`);
-  console.log(`  User data: ${userDataDir ?? "(default profile)"}`);
+  console.log(`  User data: ${effectiveUserDataDir}`);
 
   const child = spawn(browserPath, args, {
     detached: true,

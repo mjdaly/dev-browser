@@ -75,7 +75,7 @@ Browser settings are configured in a `config.json` file. Dev-browser searches fo
 | `cdpPort` | Number (default: 9223) | Chrome DevTools Protocol port |
 | `browser.mode` | `"auto"` (default), `"external"`, `"standalone"` | `auto` and `external` use Chrome for Testing; `standalone` uses Playwright (not recommended) |
 | `browser.path` | Path string | Browser executable or .app bundle. On macOS, .app paths use `open -a` for proper Dock icon |
-| `browser.userDataDir` | Path string | Browser profile directory for external mode (uses browser's default if not set) |
+| `browser.userDataDir` | Path string | Browser profile directory. Defaults to `$XDG_STATE_HOME/dev-browser/chrome-profile` (Chrome requires a non-default profile for CDP debugging) |
 
 **Auto-detection paths:**
 - **macOS**: `/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`
