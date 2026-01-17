@@ -53,6 +53,8 @@ const cdpPort = process.env.CDP_PORT ? parseInt(process.env.CDP_PORT, 10) : unde
 const browserPath = process.env.BROWSER_PATH;
 // Only pass userDataDir if explicitly set - let browser use default profile otherwise
 const userDataDir = process.env.USER_DATA_DIR || undefined;
+// Parse extraArgs from JSON string (set by get-browser-config.ts)
+const extraArgs = process.env.EXTRA_ARGS ? JSON.parse(process.env.EXTRA_ARGS) as string[] : undefined;
 const autoLaunch = process.env.AUTO_LAUNCH !== "false";
 
 console.log("Starting dev-browser with external browser mode...");
@@ -62,6 +64,9 @@ if (browserPath) {
   console.log(`  Browser path: ${browserPath}`);
 }
 console.log(`  User data dir: ${userDataDir ?? "(default profile)"}`);
+if (extraArgs?.length) {
+  console.log(`  Extra args: ${extraArgs.join(" ")}`);
+}
 console.log(`  Auto-launch: ${autoLaunch}`);
 console.log(`  Config: ~/.dev-browser/config.json`);
 console.log("");
@@ -71,6 +76,7 @@ const server = await serveWithExternalBrowser({
   cdpPort,
   browserPath,
   userDataDir,
+  extraArgs,
   autoLaunch,
 });
 

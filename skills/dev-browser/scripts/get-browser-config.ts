@@ -27,6 +27,8 @@ try {
   console.log(`BROWSER_PATH=${shellEscape(config.path || "")}`);
   // Only output userDataDir if explicitly configured
   console.log(`BROWSER_USER_DATA_DIR=${shellEscape(config.userDataDir || "")}`);
+  // Output extraArgs as JSON array string (empty array if not configured)
+  console.log(`BROWSER_EXTRA_ARGS=${shellEscape(JSON.stringify(config.extraArgs || []))}`);
 } catch (err) {
   // On error, fail with clear message (don't fall back to standalone)
   console.error(`Error: ${err instanceof Error ? err.message : err}`);

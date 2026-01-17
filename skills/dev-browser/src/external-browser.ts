@@ -41,6 +41,8 @@ export interface ExternalBrowserOptions {
   browserPath?: string;
   /** User data directory for browser profile (for auto-launch) */
   userDataDir?: string;
+  /** Extra command-line arguments to pass to the browser */
+  extraArgs?: string[];
   /** Whether to auto-launch browser if not running (default: true) */
   autoLaunch?: boolean;
   /** Idle timeout in ms before auto-shutdown (default: 30 minutes, 0 to disable) */
@@ -98,7 +100,8 @@ async function getCdpEndpoint(cdpPort: number, maxRetries = 60): Promise<string>
 function launchBrowserDetached(
   browserPath: string,
   cdpPort: number,
-  userDataDir?: string
+  userDataDir?: string,
+  extraArgs?: string[]
 ): void {
   // On macOS, if path is an app bundle, use `open -a` for proper Dock icon
   if (process.platform === "darwin" && browserPath.endsWith(".app")) {
@@ -123,11 +126,15 @@ function launchBrowserDetached(
     "--no-first-run",
     "--no-default-browser-check",
     `--user-data-dir=${effectiveUserDataDir}`,
+    ...(extraArgs || []),
   ];
 
   console.log(`Launching browser: ${browserPath}`);
   console.log(`  CDP port: ${cdpPort}`);
   console.log(`  User data: ${effectiveUserDataDir}`);
+  if (extraArgs?.length) {
+    console.log(`  Extra args: ${extraArgs.join(" ")}`);
+  }
 
   const child = spawn(browserPath, args, {
     detached: true,
@@ -173,6 +180,7 @@ export async function serveWithExternalBrowser(
   const browserPath = options.browserPath;
   // Only use userDataDir if explicitly provided - let browser use default profile otherwise
   const userDataDir = options.userDataDir;
+  const extraArgs = options.extraArgs;
   const idleTimeout = options.idleTimeout ?? IDLE_TIMEOUT_MS;
 
   // Validate port numbers
@@ -192,7 +200,7 @@ export async function serveWithExternalBrowser(
   if (!running) {
     if (autoLaunch && browserPath) {
       console.log(`Browser not running on port ${cdpPort}, launching...`);
-      launchBrowserDetached(browserPath, cdpPort, userDataDir);
+      launchBrowserDetached(browserPath, cdpPort, userDataDir, extraArgs);
     } else if (autoLaunch && !browserPath) {
       throw new Error(
         `Browser not running on port ${cdpPort} and no browserPath provided for auto-launch. ` +

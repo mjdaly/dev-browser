@@ -83,6 +83,10 @@ if [ "$BROWSER_MODE" = "external" ] && [ -n "$BROWSER_PATH" ]; then
     if [ -n "$BROWSER_USER_DATA_DIR" ]; then
         export USER_DATA_DIR="$BROWSER_USER_DATA_DIR"
     fi
+    # Export extra args if configured (JSON array string)
+    if [ -n "$BROWSER_EXTRA_ARGS" ] && [ "$BROWSER_EXTRA_ARGS" != "[]" ]; then
+        export EXTRA_ARGS="$BROWSER_EXTRA_ARGS"
+    fi
     npx tsx scripts/start-external-browser.ts
 else
     # Only reach here if --standalone was explicitly passed

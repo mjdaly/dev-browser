@@ -59,6 +59,12 @@ export interface BrowserConfig {
    * Default: ~/.dev-browser-profile
    */
   userDataDir?: string;
+  /**
+   * Extra command-line arguments to pass to the browser.
+   * Useful for environment-specific flags like --disable-gpu in WSL2.
+   * Example: ["--disable-gpu", "--no-sandbox"]
+   */
+  extraArgs?: string[];
 }
 
 /**
@@ -338,6 +344,7 @@ export function getResolvedBrowserConfig(): {
   mode: "external" | "standalone";
   path?: string;
   userDataDir?: string;
+  extraArgs?: string[];
 } {
   const config = loadConfig();
   const { browser } = config;
@@ -379,6 +386,7 @@ export function getResolvedBrowserConfig(): {
     // Only include userDataDir if explicitly configured by user
     // For external mode, let the browser use its default profile unless specified
     userDataDir: browser.userDataDir,
+    extraArgs: browser.extraArgs,
   };
 }
 

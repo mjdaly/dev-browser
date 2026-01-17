@@ -76,6 +76,7 @@ Browser settings are configured in a `config.json` file. Dev-browser searches fo
 | `browser.mode` | `"auto"` (default), `"external"`, `"standalone"` | `auto` and `external` use Chrome for Testing; `standalone` uses Playwright (not recommended) |
 | `browser.path` | Path string | Browser executable or .app bundle. On macOS, .app paths use `open -a` for proper Dock icon |
 | `browser.userDataDir` | Path string | Browser profile directory. Defaults to `$XDG_STATE_HOME/dev-browser/chrome-profile` (Chrome requires a non-default profile for CDP debugging) |
+| `browser.extraArgs` | String array | Extra command-line arguments to pass to Chrome (e.g., `["--disable-gpu"]`) |
 
 **Auto-detection paths:**
 - **macOS**: `/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`
@@ -139,6 +140,42 @@ DEV_BROWSER_CONFIG=/path/to/config.json ./server.sh
 ```
 
 This takes highest priority and is useful for CI/CD pipelines or container environments.
+
+#### WSL2 and Container Environments
+
+Chrome may crash with `SIGILL` (illegal instruction) when rendering GPU-accelerated content in WSL2 or containerized environments. This happens because GPU virtualization doesn't properly expose all CPU features to Chrome's rendering code.
+
+**Symptoms:**
+- Chrome launches and simple pages work
+- Complex pages with canvas/WebGL crash with "Error code: SIGILL"
+- dmesg shows: `trap invalid opcode` in chrome process
+
+**Fix:** Add GPU-disabling flags via `extraArgs`:
+
+```json
+{
+  "browser": {
+    "path": "/opt/google/chrome/google-chrome",
+    "extraArgs": [
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--disable-dev-shm-usage",
+      "--no-sandbox"
+    ]
+  }
+}
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--disable-gpu` | Disable GPU hardware acceleration |
+| `--disable-software-rasterizer` | Disable software fallback for GPU |
+| `--disable-dev-shm-usage` | Use /tmp instead of /dev/shm (fixes container memory issues) |
+| `--no-sandbox` | Disable Chrome sandbox (required in some containers, security tradeoff) |
+
+**When to use:** WSL2 with WSLg, Docker containers, devcontainers, or any virtualized Linux environment where GPU passthrough is incomplete.
+
+**When NOT needed:** Native Linux, macOS, Windows native, or headless mode.
 
 ### Extension Mode
 
